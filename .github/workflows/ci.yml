@@ -28,12 +28,13 @@ jobs:
       - name: Run tests with coverage
         run: go test -race -coverprofile=coverage.txt -covermode=atomic ./...
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          file: ./coverage.txt
-          fail_ci_if_error: true
+      # Comentando temporariamente o upload para o Codecov até termos o token configurado
+      # - name: Upload coverage to Codecov
+      #   uses: codecov/codecov-action@v3
+      #   with:
+      #     token: ${{ secrets.CODECOV_TOKEN }}
+      #     file: ./coverage.txt
+      #     fail_ci_if_error: true
 
   security-scan:
     runs-on: ubuntu-latest
@@ -45,21 +46,18 @@ jobs:
         with:
           go-version: '1.21'
 
+      - name: Install dependencies
+        run: go mod download
+
       - name: Run Gosec Security Scanner
         uses: securego/gosec@master
         with:
           args: ./...
 
-      - name: Install Nancy
-        run: |
-          curl -L -o nancy https://github.com/sonatype-nexus-community/nancy/releases/download/v1.0.42/nancy-v1.0.42-linux-amd64
-          chmod +x nancy
-          mv nancy /usr/local/bin
-
+      # Usando uma abordagem diferente para o Nancy
       - name: Run Nancy
         run: |
-          go list -json -m all > go.list
-          nancy sleuth -p go.list
+          go list -m all | docker run --rm -i sonatypecommunity/nancy:latest sleuth
 
   deploy:
     needs: [build-and-test, security-scan]
