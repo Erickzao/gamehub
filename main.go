@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -46,6 +48,8 @@ func initializeServer() *gin.Engine {
 	r.Use(gin.Recovery())
 	r.Use(securityHeaders())
 	r.Use(limitBodySize(10 << 20)) // 10MB
+	r.Use(rateLimiter())
+	r.Use(validateInput())
 
 	setupRoutes(r)
 	return r
@@ -57,6 +61,8 @@ func securityHeaders() gin.HandlerFunc {
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("X-Frame-Options", "DENY")
 		c.Header("X-XSS-Protection", "1; mode=block")
+		c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		c.Header("Content-Security-Policy", "default-src 'self'")
 		c.Next()
 	}
 }
@@ -65,6 +71,62 @@ func securityHeaders() gin.HandlerFunc {
 func limitBodySize(maxBytes int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		c.Next()
+	}
+}
+
+// rateLimiter implementa limitação de taxa de requisições
+func rateLimiter() gin.HandlerFunc {
+	limiter := make(map[string]int64)
+	var mu sync.Mutex
+	return func(c *gin.Context) {
+		ip := c.ClientIP()
+		mu.Lock()
+		now := time.Now().Unix()
+		// Limpa entradas antigas (mais de 1 minuto)
+		for key, timestamp := range limiter {
+			if now-timestamp > 60 {
+				delete(limiter, key)
+			}
+		}
+		// Verifica se o IP já atingiu o limite
+		if timestamp, exists := limiter[ip]; exists && now-timestamp < 1 {
+			mu.Unlock()
+			c.AbortWithStatusJSON(429, gin.H{"error": "Too many requests"})
+			return
+		}
+		limiter[ip] = now
+		mu.Unlock()
+		c.Next()
+	}
+}
+
+// validateInput valida e sanitiza as entradas
+func validateInput() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Validar tamanho dos parâmetros
+		if len(c.Request.URL.RawQuery) > 1024 {
+			c.AbortWithStatusJSON(400, gin.H{"error": "Query string too long"})
+			return
+		}
+
+		// Validar Content-Type para POSTs
+		if c.Request.Method == "POST" {
+			contentType := c.GetHeader("Content-Type")
+			if contentType != "application/json" {
+				c.AbortWithStatusJSON(415, gin.H{"error": "Unsupported Media Type"})
+				return
+			}
+		}
+
+		// Validar caracteres especiais em parâmetros
+		for param := range c.Request.URL.Query() {
+			if strings.ContainsAny(param, "<>{}[]\\") {
+				c.AbortWithStatusJSON(400, gin.H{"error": "Invalid characters in parameters"})
+				return
+			}
+		}
+
 		c.Next()
 	}
 }
