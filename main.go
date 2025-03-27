@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -39,31 +38,35 @@ type Game struct {
 	Stores          []Store  `json:"stores"`
 }
 
-// Middleware para limitar o tamanho do corpo das requisições
-func maxBodySize() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var maxBytes int64 = 10 << 20 // 10MB
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
-		c.Next()
-	}
-}
-
 func initializeServer() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
 	// Configurações de segurança
 	r.Use(gin.Recovery())
-	r.Use(maxBodySize())
-	r.Use(func(c *gin.Context) {
+	r.Use(securityHeaders())
+	r.Use(limitBodySize(10 << 20)) // 10MB
+
+	setupRoutes(r)
+	return r
+}
+
+// securityHeaders adiciona headers de segurança para todas as respostas
+func securityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("X-Frame-Options", "DENY")
 		c.Header("X-XSS-Protection", "1; mode=block")
 		c.Next()
-	})
+	}
+}
 
-	setupRoutes(r)
-	return r
+// limitBodySize limita o tamanho do corpo das requisições
+func limitBodySize(maxBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		c.Next()
+	}
 }
 
 func setupRoutes(r *gin.Engine) {
