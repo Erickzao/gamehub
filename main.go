@@ -1,8 +1,14 @@
 package main
 
 import (
+	"context"
 	"log"
+	"net"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -34,7 +40,21 @@ type Game struct {
 }
 
 func initializeServer() *gin.Engine {
+	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
+
+	// Configurações de segurança
+	r.Use(gin.Recovery())
+	r.Use(func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("X-XSS-Protection", "1; mode=block")
+		c.Next()
+	})
+
+	// Limitar o tamanho do corpo das requisições
+	r.Use(gin.MaxAllowedBytesMiddleware(10 << 20)) // 10MB
+
 	setupRoutes(r)
 	return r
 }
@@ -64,8 +84,36 @@ func loadEnv() error {
 
 func startServer(r *gin.Engine) {
 	port := getPort()
-	if err := r.Run(":" + port); err != nil {
-		log.Fatal(err)
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: r,
+		// Configurações de timeout
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       30 * time.Second,
+		ReadHeaderTimeout: 2 * time.Second,
+		// Configurações do HTTP/2
+		MaxHeaderBytes: 1 << 20, // 1MB
+	}
+
+	// Graceful shutdown
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
+		}
+	}()
+
+	// Esperar por sinais de interrupção
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	// Shutdown com timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatal("Server forced to shutdown:", err)
 	}
 }
 
