@@ -8,6 +8,11 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
+)
+
+const (
+	baseAPIURL = "https://api.rawg.io/api"
 )
 
 type RAWGResponse struct {
@@ -18,21 +23,21 @@ type RAWGResponse struct {
 }
 
 type RAWGGame struct {
-	ID              int       `json:"id"`
-	Name            string    `json:"name"`
-	Released        string    `json:"released"`
-	BackgroundImage string    `json:"background_image"`
-	Rating          float64   `json:"rating"`
-	RatingTop       int       `json:"rating_top"`
-	Added           int       `json:"added"`
-	Metacritic      int       `json:"metacritic"`
-	Playtime        int       `json:"playtime"`
-	Updated         string    `json:"updated"`
-	ReviewsCount    int       `json:"reviews_count"`
-	Description     string    `json:"description"`
-	Genres         []Genre    `json:"genres"`
-	Platforms      []Platform `json:"platforms"`
-	Stores         []RAWGStore `json:"stores"`
+	ID              int         `json:"id"`
+	Name            string      `json:"name"`
+	Released        string      `json:"released"`
+	BackgroundImage string      `json:"background_image"`
+	Rating          float64     `json:"rating"`
+	RatingTop       int         `json:"rating_top"`
+	Added           int         `json:"added"`
+	Metacritic      int         `json:"metacritic"`
+	Playtime        int         `json:"playtime"`
+	Updated         string      `json:"updated"`
+	ReviewsCount    int         `json:"reviews_count"`
+	Description     string      `json:"description"`
+	Genres          []Genre     `json:"genres"`
+	Platforms       []Platform  `json:"platforms"`
+	Stores          []RAWGStore `json:"stores"`
 }
 
 type Genre struct {
@@ -94,24 +99,72 @@ func getStores(stores []RAWGStore, gameName string) []Store {
 	return storeList
 }
 
+func validateURL(endpoint string) error {
+	if !strings.HasPrefix(endpoint, "/") {
+		return fmt.Errorf("endpoint must start with /")
+	}
+
+	validEndpoint := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			r == '/' || r == '-' || r == '_' || r == '?' || r == '=' || r == '&':
+			return r
+		}
+		return -1
+	}, endpoint)
+
+	if validEndpoint != endpoint {
+		return fmt.Errorf("invalid characters in endpoint")
+	}
+
+	return nil
+}
+
+func makeRequest(urlStr string) (*http.Response, error) {
+	_, err := url.Parse(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid URL: %w", err)
+	}
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	req, err := http.NewRequest("GET", urlStr, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	req.Header.Set("User-Agent", "GameHub/1.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error making request: %w", err)
+	}
+
+	return resp, nil
+}
+
 func fetchGames(endpoint string) ([]Game, error) {
+	if err := validateURL(endpoint); err != nil {
+		return nil, fmt.Errorf("invalid endpoint: %w", err)
+	}
+
 	apiKey := os.Getenv("RAWG_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("RAWG_API_KEY não configurada")
+		return nil, fmt.Errorf("RAWG_API_KEY not configured")
 	}
 
-	baseURL := fmt.Sprintf("https://api.rawg.io/api%s", endpoint)
-	var url string
-
-	if endpoint == "/games" || endpoint == "/games/latest" || endpoint == "/games/popular" {
-		url = fmt.Sprintf("%s?key=%s&page_size=20&stores=1,2,3,4,5,6,7,8,9,10,11", baseURL, apiKey)
-	} else if endpoint[len(endpoint)-1] == '?' {
-		url = fmt.Sprintf("%skey=%s&page_size=20&stores=1,2,3,4,5,6,7,8,9,10,11", baseURL, apiKey)
+	urlStr := fmt.Sprintf("%s%s", baseAPIURL, endpoint)
+	if strings.Contains(endpoint, "?") {
+		urlStr = fmt.Sprintf("%s&key=%s&page_size=20", urlStr, apiKey)
 	} else {
-		url = fmt.Sprintf("%s&key=%s&page_size=20&stores=1,2,3,4,5,6,7,8,9,10,11", baseURL, apiKey)
+		urlStr = fmt.Sprintf("%s?key=%s&page_size=20", urlStr, apiKey)
 	}
 
-	resp, err := http.Get(url)
+	resp, err := makeRequest(urlStr)
 	if err != nil {
 		return nil, err
 	}
@@ -119,12 +172,12 @@ func fetchGames(endpoint string) ([]Game, error) {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error reading response: %w", err)
 	}
 
 	var rawgResp RAWGResponse
 	if err := json.Unmarshal(body, &rawgResp); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error parsing response: %w", err)
 	}
 
 	var games []Game
@@ -134,17 +187,17 @@ func fetchGames(endpoint string) ([]Game, error) {
 			Title:           rawgGame.Name,
 			Description:     rawgGame.Description,
 			BackgroundImage: rawgGame.BackgroundImage,
-			Genres:         getGenres(rawgGame.Genres),
-			Rating:         rawgGame.Rating,
-			RatingTop:      rawgGame.RatingTop,
-			ReleaseDate:    rawgGame.Released,
-			Added:          rawgGame.Added,
-			Metacritic:     rawgGame.Metacritic,
-			Playtime:       rawgGame.Playtime,
-			Updated:        rawgGame.Updated,
-			Reviews:        rawgGame.ReviewsCount,
-			Platforms:      getPlatforms(rawgGame.Platforms),
-			Stores:         getStores(rawgGame.Stores, rawgGame.Name),
+			Genres:          getGenres(rawgGame.Genres),
+			Rating:          rawgGame.Rating,
+			RatingTop:       rawgGame.RatingTop,
+			ReleaseDate:     rawgGame.Released,
+			Added:           rawgGame.Added,
+			Metacritic:      rawgGame.Metacritic,
+			Playtime:        rawgGame.Playtime,
+			Updated:         rawgGame.Updated,
+			Reviews:         rawgGame.ReviewsCount,
+			Platforms:       getPlatforms(rawgGame.Platforms),
+			Stores:          getStores(rawgGame.Stores, rawgGame.Name),
 		}
 		games = append(games, game)
 	}
@@ -168,23 +221,24 @@ func getPlatforms(platforms []Platform) []string {
 	return platformNames
 }
 
-func fetchLatestGames() ([]Game, error) {
-	return fetchGames("/games")
-}
-
-func fetchPopularGames() ([]Game, error) {
-	return fetchGames("/games?ordering=-rating")
-}
-
 func fetchGameByID(id string) (*Game, error) {
-	apiKey := os.Getenv("RAWG_API_KEY")
-	if apiKey == "" {
-		return nil, fmt.Errorf("RAWG_API_KEY não configurada")
+	if id == "" {
+		return nil, fmt.Errorf("game ID cannot be empty")
 	}
 
-	url := fmt.Sprintf("https://api.rawg.io/api/games/%s?key=%s", id, apiKey)
+	endpoint := fmt.Sprintf("/games/%s", id)
+	if err := validateURL(endpoint); err != nil {
+		return nil, fmt.Errorf("invalid game ID: %w", err)
+	}
 
-	resp, err := http.Get(url)
+	apiKey := os.Getenv("RAWG_API_KEY")
+	if apiKey == "" {
+		return nil, fmt.Errorf("RAWG_API_KEY not configured")
+	}
+
+	urlStr := fmt.Sprintf("%s%s?key=%s", baseAPIURL, endpoint, apiKey)
+
+	resp, err := makeRequest(urlStr)
 	if err != nil {
 		return nil, err
 	}
@@ -192,12 +246,12 @@ func fetchGameByID(id string) (*Game, error) {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error reading response: %w", err)
 	}
 
 	var rawgGame RAWGGame
 	if err := json.Unmarshal(body, &rawgGame); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error parsing response: %w", err)
 	}
 
 	game := &Game{
@@ -205,17 +259,17 @@ func fetchGameByID(id string) (*Game, error) {
 		Title:           rawgGame.Name,
 		Description:     rawgGame.Description,
 		BackgroundImage: rawgGame.BackgroundImage,
-		Genres:         getGenres(rawgGame.Genres),
-		Rating:         rawgGame.Rating,
-		RatingTop:      rawgGame.RatingTop,
-		ReleaseDate:    rawgGame.Released,
-		Added:          rawgGame.Added,
-		Metacritic:     rawgGame.Metacritic,
-		Playtime:       rawgGame.Playtime,
-		Updated:        rawgGame.Updated,
-		Reviews:        rawgGame.ReviewsCount,
-		Platforms:      getPlatforms(rawgGame.Platforms),
-		Stores:         getStores(rawgGame.Stores, rawgGame.Name),
+		Genres:          getGenres(rawgGame.Genres),
+		Rating:          rawgGame.Rating,
+		RatingTop:       rawgGame.RatingTop,
+		ReleaseDate:     rawgGame.Released,
+		Added:           rawgGame.Added,
+		Metacritic:      rawgGame.Metacritic,
+		Playtime:        rawgGame.Playtime,
+		Updated:         rawgGame.Updated,
+		Reviews:         rawgGame.ReviewsCount,
+		Platforms:       getPlatforms(rawgGame.Platforms),
+		Stores:          getStores(rawgGame.Stores, rawgGame.Name),
 	}
 
 	return game, nil
