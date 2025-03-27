@@ -57,7 +57,8 @@ jobs:
         args: ./...
 
     - name: Run Nancy for dependency scanning
-      uses: sonatype-nexus-community/nancy-github-action@main
+      run: |
+        go list -m all | docker run --rm -i sonatypecommunity/nancy:latest sleuth
 
   deploy:
     name: Deploy
@@ -90,11 +91,9 @@ jobs:
         prerelease: false
 
     - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v1
       with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./gamehub
-        asset_name: gamehub
-        asset_content_type: application/octet-stream 
+        files: ./gamehub
+        tag_name: ${{ github.sha }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
