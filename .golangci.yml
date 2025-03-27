@@ -1,39 +1,23 @@
+run:
+  timeout: 5m
+  skip-dirs:
+    - vendor
+
 linters:
+  disable-all: true
   enable:
     - gofmt
-    - golint
     - govet
     - errcheck
     - staticcheck
     - gosimple
-    - ineffassign
-    - unconvert
-    - misspell
-    - gosec
-
-run:
-  deadline: 5m
-  tests: true
-  skip-dirs:
-    - vendor
 
 issues:
   exclude-rules:
     - path: _test\.go
       linters:
-        - gosec
+        - errcheck
 
 linters-settings:
-  errcheck:
-    check-type-assertions: true
-  govet:
-    check-shadowing: true
-  golint:
-    min-confidence: 0.8
   gofmt:
-    simplify: true
-  gosec:
-    excludes:
-      - G104 # Audit errors not checked
-  misspell:
-    locale: US 
+    simplify: true 

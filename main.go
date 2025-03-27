@@ -116,7 +116,7 @@ func searchGames(c *gin.Context) {
 func getGameByID(c *gin.Context) {
 	id := c.Param("id")
 	game, err := fetchGameByID(id)
-	
+
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to fetch game"})
 		return
@@ -136,4 +136,4 @@ func handleResponse(c *gin.Context, data interface{}, err error) {
 		return
 	}
 	c.JSON(200, data)
-} 
+}
